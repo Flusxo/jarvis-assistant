@@ -4,13 +4,17 @@ import android.Manifest
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.AlarmManager
+import android.app.AlertDialog
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import android.view.View
@@ -32,6 +36,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -51,6 +57,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val db = FirebaseFirestore.getInstance()
     private val currentUserId get() = FirebaseAuth.getInstance().currentUser?.uid
     private var currentConversationId: String? = null
+
+    // --- New: personality / tone setting ---
+    private val personalityOptions = listOf("Friendly", "Formal", "Sarcastic", "Concise")
+    private val personality get() = prefs.getString("personality", "Friendly") ?: "Friendly"
+
+    // --- New: flashlight state (toggled via voice command) ---
+    private var flashlightOn = false
+
+    // --- New: cache of (title, id) pairs so the history search box can filter locally
+    // without re-hitting Firestore on every keystroke ---
+    private val historyCache = mutableListOf<Pair<String, String>>()
 
     private val appMap = mapOf(
         "instagram" to "com.instagram.android",
@@ -98,7 +115,50 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         binding.suggestion2.setOnClickListener { handleUserMessage(binding.suggestion2.text.toString()) }
         binding.suggestion3.setOnClickListener { handleUserMessage(binding.suggestion3.text.toString()) }
 
+        binding.conversationTitle.setOnLongClickListener {
+            showPersonalityDialog()
+            true
+        }
+
+        binding.historySearch.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                renderHistoryList(s?.toString().orEmpty())
+            }
+        })
+
         loadInitialConversation()
+        maybeShowDailyBriefing()
+    }
+
+    private fun showPersonalityDialog() {
+        val current = personalityOptions.indexOf(personality).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("Jarvis personality")
+            .setSingleChoiceItems(personalityOptions.toTypedArray(), current) { dialog, which ->
+                prefs.edit().putString("personality", personalityOptions[which]).apply()
+                Toast.makeText(this, "Jarvis is now ${personalityOptions[which]}", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** Shows one AI-generated greeting bubble the first time the app is opened each day. */
+    private fun maybeShowDailyBriefing() {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(java.util.Date())
+        val lastShown = prefs.getString("last_briefing_date", null)
+        if (lastShown == today) return
+        prefs.edit().putString("last_briefing_date", today).apply()
+
+        CoroutineScope(Dispatchers.Main).launch {
+            val prompt = "Give me a short, one or two sentence daily greeting to start my day. " +
+                "Be warm but brief. Do not ask a question."
+            val reply = getAiReply(prompt)
+            hideEmptyState()
+            addBubble(reply, isUser = false, saveToHistory = false)
+        }
     }
 
     private fun loadInitialConversation() {
@@ -164,41 +224,89 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun openHistoryPanel() {
         binding.historyPanel.visibility = View.VISIBLE
-        binding.historyList.removeAllViews()
+        binding.historySearch.setText("")
 
         val userId = currentUserId ?: return
         db.collection("users").document(userId).collection("conversations")
             .orderBy("updatedAt", Query.Direction.DESCENDING)
             .get()
             .addOnSuccessListener { result ->
+                historyCache.clear()
                 for (doc in result) {
                     val title = doc.getString("title") ?: "New chat"
-                    val convId = doc.id
+                    historyCache.add(Pair(title, doc.id))
+                }
+                renderHistoryList("")
+            }
+    }
 
-                    val item = TextView(this)
-                    item.text = title
-                    item.setTextColor(0xFFF2F2F5.toInt())
-                    item.textSize = 14f
-                    item.setPadding(17, 28, 17, 28)
-                    item.setBackgroundResource(R.drawable.bg_input)
-                    val params = android.widget.LinearLayout.LayoutParams(
-                        android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-                    )
-                    params.bottomMargin = 10
-                    item.layoutParams = params
+    /** Re-renders the history list from historyCache, optionally filtered by a search query. */
+    private fun renderHistoryList(filter: String) {
+        binding.historyList.removeAllViews()
+        val query = filter.trim().lowercase()
+        val visible = if (query.isEmpty()) {
+            historyCache
+        } else {
+            historyCache.filter { it.first.lowercase().contains(query) }
+        }
 
-                    item.setOnClickListener {
-                        currentConversationId = convId
-                        prefs.edit().putString("current_conversation_id", convId).apply()
-                        binding.chatContainer.removeAllViews()
-                        loadMessagesFor(convId)
-                        binding.historyPanel.visibility = View.GONE
-                    }
+        for ((title, convId) in visible) {
+            val item = TextView(this)
+            item.text = title
+            item.setTextColor(0xFFF2F2F5.toInt())
+            item.textSize = 14f
+            item.setPadding(17, 28, 17, 28)
+            item.setBackgroundResource(R.drawable.bg_input)
+            val params = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            params.bottomMargin = 10
+            item.layoutParams = params
 
-                    binding.historyList.addView(item)
+            item.setOnClickListener {
+                currentConversationId = convId
+                prefs.edit().putString("current_conversation_id", convId).apply()
+                binding.chatContainer.removeAllViews()
+                loadMessagesFor(convId)
+                binding.historyPanel.visibility = View.GONE
+            }
+
+            item.setOnLongClickListener {
+                confirmDeleteConversation(title, convId)
+                true
+            }
+
+            binding.historyList.addView(item)
+        }
+    }
+
+    private fun confirmDeleteConversation(title: String, convId: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Delete chat?")
+            .setMessage("\"$title\" will be permanently deleted.")
+            .setPositiveButton("Delete") { _, _ -> deleteConversation(convId) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun deleteConversation(convId: String) {
+        val userId = currentUserId ?: return
+        val convoRef = db.collection("users").document(userId).collection("conversations").document(convId)
+
+        convoRef.collection("messages").get().addOnSuccessListener { messages ->
+            val batch = db.batch()
+            for (doc in messages) batch.delete(doc.reference)
+            batch.delete(convoRef)
+            batch.commit().addOnSuccessListener {
+                historyCache.removeAll { it.second == convId }
+                renderHistoryList(binding.historySearch.text.toString())
+
+                if (currentConversationId == convId) {
+                    startNewChat()
                 }
             }
+        }
     }
 
     private fun loadMessagesFor(conversationId: String) {
@@ -224,67 +332,182 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         hideEmptyState()
         addBubble(message, isUser = true)
 
-        val whatsappRequest = detectWhatsappCommand(message)
-        if (whatsappRequest != null) {
-            handleWhatsappCommand(whatsappRequest.first, whatsappRequest.second)
-            return
+        when (val command = CommandParser.parse(message, appMap)) {
+            is ParsedCommand.WhatsApp -> handleWhatsappCommand(command.name, command.text)
+            is ParsedCommand.Sms -> handleSmsCommand(command.name, command.text)
+            is ParsedCommand.OpenApp -> handleOpenAppCommand(command.appName)
+            is ParsedCommand.Play -> handlePlayCommand(command.query)
+            is ParsedCommand.Call -> handleCallCommand(command.name)
+            is ParsedCommand.Flashlight -> handleFlashlightCommand(command.turnOn)
+            is ParsedCommand.WifiPanel -> handleWifiPanelCommand()
+            is ParsedCommand.BluetoothPanel -> handleBluetoothPanelCommand()
+            is ParsedCommand.ReminderAbsolute -> handleReminderAbsoluteCommand(command.task, command.hour, command.minute)
+            is ParsedCommand.ReminderRelative -> handleReminderCommand(command.task, command.minutesFromNow)
+            is ParsedCommand.Timer -> handleReminderCommand("Timer's up!", command.minutesFromNow)
+            is ParsedCommand.Note -> handleNoteCommand(command.text)
+            is ParsedCommand.ListNotes -> handleListNotesCommand()
+            is ParsedCommand.None -> {
+                binding.statusText.text = "Thinking..."
+                showThinkingDots()
+
+                CoroutineScope(Dispatchers.Main).launch {
+                    val reply = getAiReply(message)
+                    hideThinkingDots()
+                    addBubble(reply, isUser = false)
+                    binding.statusText.text = "Online"
+                    speak(reply)
+                }
+            }
         }
+    }
 
-        val openAppName = detectOpenAppCommand(message)
-        if (openAppName != null) {
-            handleOpenAppCommand(openAppName)
-            return
-        }
+    // --- New command handlers ---
 
-        val playQuery = detectPlayCommand(message)
-        if (playQuery != null) {
-            handlePlayCommand(playQuery)
-            return
-        }
-
-        val callName = detectCallCommand(message)
-        if (callName != null) {
-            handleCallCommand(callName)
-            return
-        }
-
-        val reminder = detectReminderCommand(message)
-        if (reminder != null) {
-            handleReminderCommand(reminder.first, reminder.second)
-            return
-        }
-
-        val timerMinutes = detectTimerCommand(message)
-        if (timerMinutes != null) {
-            handleReminderCommand("Timer's up!", timerMinutes)
-            return
-        }
-
-        binding.statusText.text = "Thinking..."
-        showThinkingDots()
-
-        CoroutineScope(Dispatchers.Main).launch {
-            val reply = getAiReply(message)
-            hideThinkingDots()
+    private fun handleSmsCommand(name: String, text: String) {
+        val hasContacts = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+        if (!hasContacts) {
+            val reply = "I need contacts permission to text $name. Try asking me to call someone first to grant it."
             addBubble(reply, isUser = false)
-            binding.statusText.text = "Online"
+            speak(reply)
+            return
+        }
+
+        val number = findPhoneNumber(name)
+        if (number == null) {
+            val reply = "I couldn't find a contact named $name."
+            addBubble(reply, isUser = false)
+            speak(reply)
+            return
+        }
+
+        val reply = "Opening a text to $name."
+        addBubble(reply, isUser = false)
+        speak(reply)
+
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("smsto:$number")
+            putExtra("sms_body", text)
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            val fallback = "I couldn't find a messaging app to send that with."
+            addBubble(fallback, isUser = false)
+            speak(fallback)
+        }
+    }
+
+    private fun handleFlashlightCommand(turnOn: Boolean) {
+        try {
+            val cameraManager = getSystemService(CAMERA_SERVICE) as CameraManager
+            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+            if (cameraId == null) {
+                val reply = "This device doesn't seem to have a flashlight."
+                addBubble(reply, isUser = false)
+                speak(reply)
+                return
+            }
+            cameraManager.setTorchMode(cameraId, turnOn)
+            flashlightOn = turnOn
+            val reply = if (turnOn) "Flashlight on." else "Flashlight off."
+            addBubble(reply, isUser = false)
+            speak(reply)
+        } catch (e: Exception) {
+            val reply = "I couldn't control the flashlight on this device."
+            addBubble(reply, isUser = false)
             speak(reply)
         }
     }
 
-    private fun detectOpenAppCommand(message: String): String? {
-        val lower = message.lowercase().trim()
-        val triggers = listOf("open ", "launch ", "start ")
-        for (trigger in triggers) {
-            if (lower.startsWith(trigger)) {
-                var appName = lower.removePrefix(trigger).trim()
-                appName = appName.removeSuffix(" now").removeSuffix(" please").trim()
-                if (appMap.containsKey(appName)) {
-                    return appName
-                }
+    private fun handleWifiPanelCommand() {
+        val reply = "Here's the Wi-Fi panel."
+        addBubble(reply, isUser = false)
+        speak(reply)
+        try {
+            startActivity(Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY))
+        } catch (e: Exception) {
+            startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+        }
+    }
+
+    private fun handleBluetoothPanelCommand() {
+        val reply = "Here's Bluetooth settings."
+        addBubble(reply, isUser = false)
+        speak(reply)
+        startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+    }
+
+    private fun handleReminderAbsoluteCommand(task: String, hour: Int, minute: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationPermissionCode)
             }
         }
-        return null
+
+        val target = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (before(Calendar.getInstance())) add(Calendar.DAY_OF_YEAR, 1)
+        }
+
+        val intent = Intent(this, ReminderReceiver::class.java).apply {
+            putExtra("message", task)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, System.currentTimeMillis().toInt(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = getSystemService(ALARM_SERVICE) as AlarmManager
+        alarmManager.set(AlarmManager.RTC_WAKEUP, target.timeInMillis, pendingIntent)
+
+        val timeLabel = SimpleDateFormat("h:mm a", Locale.US).format(target.time)
+        val reply = "Got it, I'll remind you to $task at $timeLabel."
+        addBubble(reply, isUser = false)
+        speak(reply)
+    }
+
+    private fun handleNoteCommand(text: String) {
+        val userId = currentUserId
+        if (userId == null) {
+            val reply = "I need you to be signed in to save notes."
+            addBubble(reply, isUser = false)
+            speak(reply)
+            return
+        }
+        val note = hashMapOf("text" to text, "timestamp" to System.currentTimeMillis())
+        db.collection("users").document(userId).collection("notes").add(note)
+
+        val reply = "Noted."
+        addBubble(reply, isUser = false)
+        speak(reply)
+    }
+
+    private fun handleListNotesCommand() {
+        val userId = currentUserId
+        if (userId == null) {
+            addBubble("I need you to be signed in to see notes.", isUser = false)
+            return
+        }
+        db.collection("users").document(userId).collection("notes")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(5)
+            .get()
+            .addOnSuccessListener { result ->
+                val reply = if (result.isEmpty) {
+                    "You don't have any notes yet."
+                } else {
+                    "Your recent notes:\n" + result.documents.joinToString("\n") { doc ->
+                        "\u2022 ${doc.getString("text") ?: ""}"
+                    }
+                }
+                addBubble(reply, isUser = false)
+                speak("Here are your recent notes.")
+            }
     }
 
     private fun handleOpenAppCommand(appName: String) {
@@ -303,17 +526,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun detectPlayCommand(message: String): String? {
-        val lower = message.lowercase().trim()
-        val triggers = listOf("play ")
-        for (trigger in triggers) {
-            if (lower.startsWith(trigger)) {
-                return message.substring(trigger.length).trim()
-            }
-        }
-        return null
-    }
-
     private fun handlePlayCommand(query: String) {
         val reply = "Playing $query."
         addBubble(reply, isUser = false)
@@ -323,17 +535,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             data = Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(query)}")
         }
         startActivity(intent)
-    }
-
-    private fun detectCallCommand(message: String): String? {
-        val lower = message.lowercase().trim()
-        val triggers = listOf("call ", "phone ", "dial ")
-        for (trigger in triggers) {
-            if (lower.startsWith(trigger)) {
-                return message.substring(trigger.length).trim()
-            }
-        }
-        return null
     }
 
     private fun handleCallCommand(name: String) {
@@ -394,24 +595,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return null
     }
 
-    private fun detectWhatsappCommand(message: String): Pair<String, String>? {
-        val lower = message.lowercase().trim()
-        val patterns = listOf(
-            Regex("^whatsapp (.+?) saying (.+)$"),
-            Regex("^message (.+?) on whatsapp saying (.+)$"),
-            Regex("^text (.+?) on whatsapp saying (.+)$")
-        )
-        for (pattern in patterns) {
-            val match = pattern.find(lower)
-            if (match != null) {
-                val name = match.groupValues[1].trim()
-                val text = match.groupValues[2].trim()
-                return Pair(name, text)
-            }
-        }
-        return null
-    }
-
     private fun handleWhatsappCommand(name: String, text: String) {
         val hasContacts = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
         if (!hasContacts) {
@@ -438,26 +621,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             data = Uri.parse("https://wa.me/$cleanNumber?text=${Uri.encode(text)}")
         }
         startActivity(intent)
-    }
-
-    private fun detectReminderCommand(message: String): Pair<String, Int>? {
-        val lower = message.lowercase().trim()
-        val pattern = Regex("^remind me to (.+?) in (\\d+) (minute|minutes|hour|hours)$")
-        val match = pattern.find(lower) ?: return null
-        val task = match.groupValues[1].trim()
-        val amount = match.groupValues[2].toIntOrNull() ?: return null
-        val unit = match.groupValues[3]
-        val minutes = if (unit.startsWith("hour")) amount * 60 else amount
-        return Pair(task, minutes)
-    }
-
-    private fun detectTimerCommand(message: String): Int? {
-        val lower = message.lowercase().trim()
-        val pattern = Regex("^set a timer for (\\d+) (minute|minutes|second|seconds)$")
-        val match = pattern.find(lower) ?: return null
-        val amount = match.groupValues[1].toIntOrNull() ?: return null
-        val unit = match.groupValues[2]
-        return if (unit.startsWith("second")) 0 else amount
     }
 
     private fun handleReminderCommand(task: String, minutesFromNow: Int) {
@@ -511,7 +674,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private suspend fun getAiReply(message: String): String {
         return withContext(Dispatchers.IO) {
             try {
-                val json = JSONObject().put("message", message).toString()
+                val json = JSONObject()
+                    .put("message", message)
+                    .put("tone", personality)
+                    .toString()
                 val body = json.toRequestBody("application/json".toMediaType())
                 val request = Request.Builder().url(relayUrl).post(body).build()
                 httpClient.newCall(request).execute().use { response ->
@@ -661,6 +827,16 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         dotAnimators.forEach { it.cancel() }
         tts.stop()
         tts.shutdown()
+        if (flashlightOn) {
+            try {
+                val cameraManager = getSystemService(CAMERA_SERVICE) as CameraManager
+                val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                    cameraManager.getCameraCharacteristics(id)
+                        .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                }
+                cameraId?.let { cameraManager.setTorchMode(it, false) }
+            } catch (e: Exception) { /* best effort cleanup */ }
+        }
         super.onDestroy()
     }
 }
