@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1049139523928",
+    "project_id": "jarvis-assistant-41cab",
+    "storage_bucket": "jarvis-assistant-41cab.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1049139523928:android:99d80324bec7e77958752d",
+        "android_client_info": {
+          "package_name": "com.jarvis.assistant"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD9h7nP4763iG1iPh2boMx2u_xAUnI9SHo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

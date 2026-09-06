@@ -1,0 +1,70 @@
+Starting a Gradle Daemon, 1 incompatible and 1 stopped Daemons could not be reused, use --status for details
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:dataBindingMergeDependencyArtifactsDebug UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:dataBindingGenBaseClassesDebug UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:compressDebugAssets UP-TO-DATE
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeDebugStartupProfile UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :app:mergeDebugNativeLibs UP-TO-DATE
+> Task :app:stripDebugDebugSymbols UP-TO-DATE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+
+> Task :app:compileDebugKotlin
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:2:26 Unresolved reference: layoutInflater
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:3:25 Unresolved reference: R
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:3:51 Unresolved reference: R
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:4:13 Unresolved reference: binding
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:8:28 Unresolved reference: TextView
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:8:38 Variable expected
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:10:37 Unresolved reference: TextView
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:10:47 Unresolved reference: R
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:10:64 Variable expected
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:12:9 Unresolved reference: binding
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:14:9 Unresolved reference: binding
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:15:13 Unresolved reference: binding
+e: file:///workspaces/jarvis-assistant/app/src/main/java/com/jarvis/assistant/MainActivity.kt:15:43 Unresolved reference: View
+
+> Task :app:compileDebugKotlin FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 33s
+32 actionable tasks: 2 executed, 30 up-to-date

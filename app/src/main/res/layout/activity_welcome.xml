@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="32dp"
+    android:background="#131315">
+
+    <ImageView
+        android:id="@+id/logoImage"
+        android:layout_width="100dp"
+        android:layout_height="100dp"
+        android:src="@drawable/jarvis_logo"
+        android:contentDescription="Jarvis logo"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Jarvis"
+        android:fontFamily="sans-serif-medium"
+        android:textColor="#F0F0F0"
+        android:textSize="22sp"
+        android:paddingTop="16dp"/>
+
+    <TextView
+        android:id="@+id/subtitleText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Your personal AI assistant"
+        android:fontFamily="sans-serif"
+        android:textColor="#6E6E73"
+        android:textSize="13sp"
+        android:paddingTop="4dp"
+        android:paddingBottom="48dp"/>
+
+    <Button
+        android:id="@+id/actionButton"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:text="Sign in with Google"
+        android:fontFamily="sans-serif"
+        android:textColor="#0A0A0B"
+        android:textSize="14sp"
+        android:background="@drawable/bg_send_button"/>
+
+</LinearLayout>
